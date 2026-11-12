@@ -1,0 +1,77 @@
+{
+	"name": "@wordsmith-ai/n8n-nodes-wordsmith",
+	"version": "0.1.0",
+	"description": "n8n nodes for Wordsmith: ask legal agents, review, redline, compare and draft documents, manage tasks, and start workflows from Wordsmith events.",
+	"license": "MIT",
+	"homepage": "https://github.com/wordsmith-ai/n8n-nodes-wordsmith#readme",
+	"keywords": [
+		"n8n-community-node-package",
+		"wordsmith",
+		"legal",
+		"ai"
+	],
+	"author": {
+		"name": "Wordsmith AI",
+		"email": "support@wordsmith.ai"
+	},
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/wordsmith-ai/n8n-nodes-wordsmith.git"
+	},
+	"packageManager": "pnpm@10.33.2",
+	"scripts": {
+		"build": "n8n-node build",
+		"build:watch": "tsc --watch",
+		"dev": "n8n-node dev",
+		"lint": "n8n-node lint",
+		"lint:fix": "n8n-node lint --fix",
+		"format:check": "prettier --check credentials nodes test",
+		"test": "n8n-node build && node --test \"test/*.test.mjs\"",
+		"audit": "pnpm audit --audit-level=high --ignore-registry-errors",
+		"release": "n8n-node release",
+		"prepublishOnly": "n8n-node prerelease"
+	},
+	"files": [
+		"dist"
+	],
+	"n8n": {
+		"n8nNodesApiVersion": 1,
+		"strict": true,
+		"credentials": [
+			"dist/credentials/WordsmithApi.credentials.js",
+			"dist/credentials/WordsmithOAuth2Api.credentials.js"
+		],
+		"nodes": [
+			"dist/nodes/Wordsmith/Wordsmith.node.js",
+			"dist/nodes/WordsmithTrigger/WordsmithTrigger.node.js",
+			"dist/nodes/WordsmithPollingTrigger/WordsmithPollingTrigger.node.js"
+		]
+	},
+	"devDependencies": {
+		"@n8n/node-cli": "0.56.2",
+		"eslint": "9.32.0",
+		"n8n-workflow": "2.16.0",
+		"prettier": "3.6.2",
+		"release-it": "^21.1.0",
+		"typescript": "5.9.2"
+	},
+	"peerDependencies": {
+		"n8n-workflow": "*"
+	},
+	"pnpm": {
+		"overrides": {
+			"lodash@>=4.0.0 <4.18.1": ">=4.18.1 <5",
+			"form-data@>=4.0.0 <4.0.6": ">=4.0.6 <5",
+			"basic-ftp@<6.2.1": ">=6.2.1 <7",
+			"zod@>=3.0.0 <4": ">=4.6.6 <5",
+			"zod@>=4.0.0 <4.6.6": ">=4.6.6 <5",
+			"@n8n/node-cli@0.56.2>@n8n/ai-node-sdk": "-",
+			"@n8n/node-cli>rimraf": ">=6.1.4 <7",
+			"uuid@>=10.0.0 <11.1.1": ">=11.1.1 <12",
+			"minimatch@>=10.0.0 <11.0.1": ">=11.0.1 <12"
+		}
+	},
+	"publishConfig": {
+		"access": "public"
+	}
+}
