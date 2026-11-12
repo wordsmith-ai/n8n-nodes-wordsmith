@@ -83,6 +83,10 @@ jobs:
           node-version: '22'
           cache: 'pnpm'
 
+      # Trusted publishing (OIDC) needs npm 11.5.1 or later. Node 22 ships npm 10, which asks for a token instead.
+      - name: Use npm 11
+        run: npm install -g npm@^11.5.1
+
       - name: Install dependencies
         run: 'pnpm install --frozen-lockfile'
 
