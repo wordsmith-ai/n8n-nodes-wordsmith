@@ -105,3 +105,38 @@ describe('Wordsmith Polling Trigger', () => {
 		assert.equal(newItems(edited, key, staticData).length, 0);
 	});
 });
+
+describe('a node saved with 0.1.0', () => {
+	const run = (typeVersion, parameters) => {
+		const read = [];
+		const result = new Wordsmith().execute.call({
+			getInputData: () => [{ json: {} }],
+			getNode: () => ({
+				name: 'Wordsmith',
+				type: 'n8n-nodes-wordsmith.wordsmith',
+				typeVersion,
+				parameters,
+			}),
+			getNodeParameter: (name) => {
+				read.push(name);
+				return parameters[name];
+			},
+			continueOnFail: () => true,
+		});
+		return { result, read };
+	};
+
+	it('stops a version-1 node before reading a parameter, even with Continue On Fail', async () => {
+		// 0.1.0's Ask was its default resource and operation, so a saved node often holds only its question.
+		const { result, read } = run(1, { question: 'Is clause 4 standard?' });
+		await assert.rejects(result);
+		assert.deepEqual(read, []);
+	});
+
+	it('lets a version-2 node run', async () => {
+		const { result, read } = run(2, { resource: 'agent', operation: 'no_such_operation' });
+		const [items] = await result;
+		assert.equal(items.length, 1);
+		assert.ok(read.includes('operation'));
+	});
+});

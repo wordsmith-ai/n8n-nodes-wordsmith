@@ -1,4 +1,4 @@
-# @wordsmith-ai/n8n-nodes-wordsmith
+# n8n-nodes-wordsmith
 
 n8n nodes for [Wordsmith](https://www.wordsmith.ai), the AI platform for in-house legal teams. Ask a
 Wordsmith agent, review, redline, compare and draft documents, manage tasks, and start workflows when
@@ -13,7 +13,7 @@ The full guide is at [docs.wordsmith.ai/n8n](https://docs.wordsmith.ai/n8n).
 
 Follow n8n's [community nodes installation guide](https://docs.n8n.io/integrations/community-nodes/installation/).
 On self-hosted n8n, an owner or admin opens **Settings → Community Nodes**, selects **Install**, and enters
-`@wordsmith-ai/n8n-nodes-wordsmith`.
+`n8n-nodes-wordsmith`.
 
 To let an n8n AI Agent use the Wordsmith node as a tool, set `N8N_COMMUNITY_PACKAGES_ALLOW_TOOL_USAGE=true`.
 

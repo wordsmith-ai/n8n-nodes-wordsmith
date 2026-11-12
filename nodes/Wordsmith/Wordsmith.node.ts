@@ -1,6 +1,7 @@
 import type {
 	IDataObject,
 	IExecuteFunctions,
+	INode,
 	INodeExecutionData,
 	INodeType,
 	INodeTypeDescription,
@@ -23,6 +24,14 @@ import { documentProperties, fileProperties } from './descriptions/fileDocument'
 import { draftProperties, reviewProperties } from './descriptions/reviewDraft';
 import { jobProperties, taskProperties } from './descriptions/taskJob';
 
+/**
+ * 0.1.0 of this npm package had a node of the same name at version 1, and that is the only version 1 ever
+ * published. Its saved parameters can't identify it: n8n omits defaults, and both nodes have a `question` field.
+ */
+export function savedByFirstRelease(node: INode): boolean {
+	return node.typeVersion === 1;
+}
+
 export class Wordsmith implements INodeType {
 	description: INodeTypeDescription = {
 		displayName: 'Wordsmith',
@@ -39,6 +48,14 @@ export class Wordsmith implements INodeType {
 		outputs: [NodeConnectionTypes.Main],
 		credentials: credentialsFor(),
 		properties: [
+			{
+				displayName:
+					'This node was added with version 0.1.0 of the package and no longer runs. Add the Wordsmith node again, choose the action you need, and remove this node.',
+				name: 'firstReleaseNotice',
+				type: 'notice',
+				default: '',
+				displayOptions: { show: { '@version': [1] } },
+			},
 			...authenticationProperties,
 			{
 				displayName: 'Resource',
@@ -80,6 +97,16 @@ export class Wordsmith implements INodeType {
 	async execute(this: IExecuteFunctions): Promise<INodeExecutionData[][]> {
 		const items = this.getInputData();
 		const returnData: INodeExecutionData[] = [];
+		if (savedByFirstRelease(this.getNode())) {
+			throw new NodeOperationError(
+				this.getNode(),
+				'This Wordsmith node was added with version 0.1.0 of the package',
+				{
+					description:
+						'Version 0.2.0 replaced its actions. Add the Wordsmith node to this workflow again, choose the action you need, and remove this node.',
+				},
+			);
+		}
 		for (let itemIndex = 0; itemIndex < items.length; itemIndex++) {
 			try {
 				const operation = this.getNodeParameter('operation', itemIndex) as string;

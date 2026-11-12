@@ -50,10 +50,7 @@ function authenticationField(
 	};
 }
 
-/**
- * The Authentication field every Wordsmith node shows. Version 1 had API keys only, and a saved version-1 node
- * has no Authentication value, so version 1 keeps the API key as its default. Version 2 recommends OAuth2.
- */
+/** The Authentication field every Wordsmith node shows. Version 2, the default, recommends OAuth2. */
 export const authenticationProperties: INodeProperties[] = [
 	authenticationField(1, 'apiKey', [oAuth2Option, apiKeyOption]),
 	authenticationField(2, 'oAuth2', [oAuth2Option, apiKeyOption]),
@@ -75,7 +72,10 @@ export const triggerAuthenticationProperties: INodeProperties[] = [1, 2].map((ve
 	]),
 );
 
-/** The node versions: 1 shipped with API keys only, 2 adds OAuth2 as the default. */
+/**
+ * Version 1 is kept so n8n recognises a Wordsmith node saved with the package's 0.1.0, the only release that
+ * published version 1, and the action node can stop it. Version 2 is the default and defaults to OAuth2.
+ */
 export const NODE_VERSIONS = { version: [1, 2], defaultVersion: 2 };
 
 export const credentialsFor = (): INodeCredentialDescription[] => [
@@ -108,7 +108,7 @@ export function credentialName(this: WordsmithContext): string {
 }
 
 /** Keep in step with package.json; a test checks it. */
-export const PACKAGE_VERSION = '0.1.0';
+export const PACKAGE_VERSION = '0.2.0';
 export const INTEGRATION_HEADER = { 'Wordsmith-Integration': `n8n/${PACKAGE_VERSION}` };
 
 const REGION_HOSTS: Record<string, string> = {
