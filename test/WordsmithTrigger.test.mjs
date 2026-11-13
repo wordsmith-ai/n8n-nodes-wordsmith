@@ -7,6 +7,7 @@ const require = createRequire(import.meta.url);
 const {
 	WordsmithTrigger,
 	filteredOut,
+	integrationFor,
 } = require('../dist/nodes/WordsmithTrigger/WordsmithTrigger.node.js');
 
 const WEBHOOK_URL = 'https://n8n.example.com/webhook/abc/webhook';
@@ -58,6 +59,7 @@ describe('Wordsmith Trigger lifecycle', () => {
 			url: WEBHOOK_URL,
 			event_types: ['task.created'],
 			description: 'n8n: Matter intake',
+			integration: { platform: 'n8n', flow_id: 'wf1', flow_name: 'Matter intake' },
 		});
 		assert.equal(ctx.calls[0].headers['Wordsmith-Integration'].startsWith('n8n/'), true);
 		assert.deepEqual(ctx.staticData, { endpointId: 'we_1', secret: 'whsec_1' });
@@ -70,6 +72,39 @@ describe('Wordsmith Trigger lifecycle', () => {
 		});
 		await methods.create.call(ctx);
 		assert.deepEqual(ctx.calls[0].body.event_types, ['task.*', 'review.completed']);
+	});
+
+	it('names the workflow in the integration object, within the API’s lengths', () => {
+		assert.deepEqual(integrationFor({ id: 'wf1', name: '  Intake  ' }), {
+			platform: 'n8n',
+			flow_id: 'wf1',
+			flow_name: 'Intake',
+		});
+		assert.deepEqual(integrationFor({ id: undefined, name: '' }), { platform: 'n8n' });
+		assert.equal(integrationFor({ id: 'wf1', name: 'x'.repeat(300) }).flow_name.length, 200);
+	});
+
+	it('gives an OAuth2 scope refusal its own error, and leaves other 403s to the API’s message', async () => {
+		const apiText = 'This needs the webhooks:write scope. Reconnect the app and approve it.';
+		const refused = () => ok({ error: 'insufficient_scope', error_description: apiText }, 403);
+		const oauth = context({ parameters: { authentication: 'oAuth2' }, respond: refused });
+		await assert.rejects(methods.create.call(oauth), (error) => {
+			assert.equal(error.httpCode, '403');
+			assert.notEqual(error.message, apiText);
+			assert.ok(error.description.startsWith(apiText));
+			assert.ok(!error.description.includes('..'));
+			return true;
+		});
+
+		// An API key, or a 403 that is not a missing scope, shows the API's own message.
+		const apiKey = context({ respond: refused });
+		await assert.rejects(methods.create.call(apiKey), { httpCode: '403', message: apiText });
+		const roleText = 'Your role cannot create webhook endpoints.';
+		const role = context({
+			parameters: { authentication: 'oAuth2' },
+			respond: () => ok({ message: roleText, error_code: 'forbidden' }, 403),
+		});
+		await assert.rejects(methods.create.call(role), { httpCode: '403', message: roleText });
 	});
 
 	it('explains a 404 as the rollout gate', async () => {
@@ -86,6 +121,27 @@ describe('Wordsmith Trigger lifecycle', () => {
 		});
 		assert.equal(await methods.checkExists.call(ctx), true);
 		assert.equal(ctx.calls.length, 1);
+	});
+
+	it('replaces an endpoint made before n8n sent the integration object', async () => {
+		const ctx = context({
+			staticData: { endpointId: 'we_1', secret: 'whsec_1' },
+			respond: (options) =>
+				options.method === 'GET'
+					? ok({
+							id: 'we_1',
+							url: WEBHOOK_URL,
+							status: 'enabled',
+							event_types: ['task.created'],
+							integration: null,
+						})
+					: ok(null, 204),
+		});
+		assert.equal(await methods.checkExists.call(ctx), false);
+		assert.deepEqual(
+			ctx.calls.map((c) => c.method),
+			['GET', 'DELETE'],
+		);
 	});
 
 	it('replaces an endpoint whose events changed', async () => {
@@ -195,6 +251,146 @@ describe('Wordsmith Trigger webhook', () => {
 		const again = webhookContext({ body, sign: signedWith('whsec_1') });
 		again.staticData.seenEventIds = first.staticData.seenEventIds;
 		assert.equal((await trigger.webhook.call(again)).workflowData, undefined);
+	});
+
+	it('reads the task and the comment for a new comment', async () => {
+		const body = event('task.comment_added', { task_id: 't1', comment_id: 'c2', url: 'u' });
+		const ctx = webhookContext({
+			body,
+			parameters: { event: 'task_comment_added' },
+			sign: signedWith('whsec_1'),
+			respond: (options) =>
+				options.url.endsWith('/comments')
+					? ok([
+							{ id: 'c1', content: 'older' },
+							{ id: 'c2', content: 'Please review', parent_comment_id: 'c1' },
+						])
+					: ok({ id: 't1', title: 'NDA' }),
+		});
+		const result = await trigger.webhook.call(ctx);
+		assert.deepEqual(
+			ctx.calls.map((c) => c.url),
+			[`${API}/tasks/t1`, `${API}/tasks/t1/comments`],
+		);
+		const json = result.workflowData[0][0].json;
+		assert.deepEqual(json.task, { id: 't1', title: 'NDA' });
+		assert.deepEqual(json.comment, { id: 'c2', content: 'Please review', parent_comment_id: 'c1' });
+	});
+
+	it('fails the execution when the comment is gone', async () => {
+		const ctx = webhookContext({
+			body: event('task.comment_added', { task_id: 't1', comment_id: 'c9' }),
+			parameters: { event: 'task_comment_added' },
+			sign: signedWith('whsec_1'),
+			respond: (options) =>
+				options.url.endsWith('/comments')
+					? ok([{ id: 'c1', content: 'Another comment' }])
+					: ok({ id: 't1' }),
+		});
+		await assert.rejects(trigger.webhook.call(ctx), (error) => {
+			assert.equal(error.name, 'NodeOperationError');
+			assert.match(error.message, /comment c9/);
+			// The error names the missing comment only, never the other comments it read.
+			assert.ok(!JSON.stringify(error).includes('Another comment'));
+			return true;
+		});
+	});
+
+	it('outputs an input request’s fields and link without reading anything', async () => {
+		const data = {
+			input_request_id: 'ir1',
+			session_id: 's1',
+			task_id: null,
+			kind: 'approval',
+			status: 'pending',
+			url: 'https://app.wordsmith.ai/input-requests/ir1',
+		};
+		const body = event('input_request.created', data);
+		const ctx = webhookContext({
+			body,
+			parameters: { event: 'agent_waiting_for_input' },
+			sign: signedWith('whsec_1'),
+		});
+		const result = await trigger.webhook.call(ctx);
+		assert.equal(ctx.calls.length, 0);
+		assert.deepEqual(result.workflowData[0][0].json, {
+			...data,
+			event_id: body.id,
+			event_type: 'input_request.created',
+			event_created_at: '2026-11-12T10:00:00Z',
+			actor_kind: 'user',
+		});
+	});
+
+	it('reads the repository or report and keeps the event’s counts', async () => {
+		const added = webhookContext({
+			body: event('repository.documents_added', {
+				repository_id: 'rp1',
+				document_ids: ['d1', 'd2'],
+				count: 2,
+			}),
+			parameters: { event: 'repository_documents_added' },
+			sign: signedWith('whsec_1'),
+			respond: () => ok({ id: 'rp1', name: 'Precedents' }),
+		});
+		const repository = (await trigger.webhook.call(added)).workflowData[0][0].json;
+		assert.equal(added.calls[0].url, `${API}/repositories/rp1`);
+		assert.deepEqual(repository.repository, { id: 'rp1', name: 'Precedents' });
+		assert.deepEqual(repository.document_ids, ['d1', 'd2']);
+		assert.equal(repository.count, 2);
+
+		const run = webhookContext({
+			body: event('report.run_completed', {
+				report_id: 'rep1',
+				run_id: 'run1',
+				status: 'succeeded',
+			}),
+			parameters: { event: 'report_run_completed' },
+			sign: signedWith('whsec_1'),
+			respond: () => ok({ id: 'rep1', name: 'NDA tracker' }),
+		});
+		const report = (await trigger.webhook.call(run)).workflowData[0][0].json;
+		assert.equal(run.calls[0].url, `${API}/reports/rep1`);
+		assert.equal(report.run_id, 'run1');
+		assert.equal(report.status, 'succeeded');
+	});
+
+	it('reads a finished job of the chosen type, and skips other types', async () => {
+		const finished = (jobType, operationType) =>
+			webhookContext({
+				body: event('operation.succeeded', { operation_id: 'op1', operation_type: operationType }),
+				parameters: { event: 'job_finished', jobType },
+				sign: signedWith('whsec_1'),
+				respond: () => ok({ id: 'op1', type: operationType, status: 'succeeded' }),
+			});
+		const review = finished('review', 'review');
+		const result = await trigger.webhook.call(review);
+		assert.equal(review.calls[0].url, `${API}/operations/op1`);
+		assert.deepEqual(result.workflowData[0][0].json.operation, {
+			id: 'op1',
+			type: 'review',
+			status: 'succeeded',
+		});
+		const draft = finished('review', 'draft');
+		assert.equal((await trigger.webhook.call(draft)).workflowData, undefined);
+		assert.equal(draft.calls.length, 0);
+		const any = finished('any', 'draft');
+		assert.ok((await trigger.webhook.call(any)).workflowData);
+	});
+
+	it('fails the execution with the API’s text when an OAuth2 read lacks a scope', async () => {
+		const apiText = 'This needs the reports:read scope. Reconnect the app and approve it.';
+		const ctx = webhookContext({
+			body: event('report.run_completed', {
+				report_id: 'rep1',
+				run_id: 'run1',
+				status: 'succeeded',
+			}),
+			parameters: { event: 'report_run_completed', authentication: 'oAuth2' },
+			sign: signedWith('whsec_1'),
+			respond: () => ok({ error: 'insufficient_scope', error_description: apiText }, 403),
+		});
+		await assert.rejects(trigger.webhook.call(ctx), { httpCode: '403', message: apiText });
 	});
 
 	it('fails the execution for an event whose resource the user can no longer read', async () => {

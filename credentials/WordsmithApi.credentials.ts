@@ -6,6 +6,8 @@ import type {
 	INodeProperties,
 } from 'n8n-workflow';
 
+import { apiHostExpression } from '../nodes/shared/hosts';
+
 export class WordsmithApi implements ICredentialType {
 	name = 'wordsmithApi';
 
@@ -31,40 +33,25 @@ export class WordsmithApi implements ICredentialType {
 				'Create an API key in Wordsmith under Settings → API keys. The connection acts with the access of the person who created the key. For automations that serve a whole team, create the key as a user who can see that team’s work.',
 		},
 		{
-			displayName: 'Region',
-			name: 'region',
-			type: 'options',
-			options: [
-				{
-					name: 'Europe',
-					value: 'eu',
-				},
-				{
-					name: 'United States',
-					value: 'us',
-				},
-				{
-					name: 'Custom Host',
-					value: 'custom',
-				},
-			],
-			default: 'eu',
+			displayName: 'Use a Custom Host',
+			name: 'useCustomHost',
+			type: 'boolean',
+			default: false,
 			description:
-				'The region your Wordsmith organisation is hosted in. If you are not sure, ask your Wordsmith admin.',
+				'Whether to call a specific Wordsmith host. Leave it off: the default host reaches every Wordsmith organisation. Turn it on to keep requests in the US region, for example for data residency, or to use a test environment.',
 		},
 		{
-			displayName: 'Base URL',
-			name: 'baseUrl',
+			displayName: 'API Host',
+			name: 'apiHost',
 			type: 'string',
-			default: '',
-			placeholder: 'e.g. https://staging.api.wordsmith.ai',
-			description: 'An https host on wordsmith.ai, without /api/v1. Any other host is refused.',
-			displayOptions: {
-				show: {
-					region: ['custom'],
-				},
-			},
+			default: 'https://api.wordsmith.ai',
+			description:
+				'An https host on wordsmith.ai, without /api/v1. Use https://api.us.wordsmith.ai for the US region.',
+			displayOptions: { show: { useCustomHost: [true] } },
 		},
+		// 0.2.0 stored a region and a custom host. They stay hidden so a credential saved then keeps its host.
+		{ displayName: 'Region', name: 'region', type: 'hidden', default: 'eu' },
+		{ displayName: 'Base URL', name: 'baseUrl', type: 'hidden', default: '' },
 	];
 
 	authenticate: IAuthenticateGeneric = {
@@ -78,9 +65,8 @@ export class WordsmithApi implements ICredentialType {
 
 	test: ICredentialTestRequest = {
 		request: {
-			// A custom host must be https on wordsmith.ai; anything else resolves to a host that fails the test.
-			baseURL:
-				'={{ $credentials.region === "us" ? "https://api.us.wordsmith.ai" : $credentials.region === "custom" ? (/^https:\\/\\/([a-z0-9-]+\\.)*wordsmith\\.ai\\/?$/i.test(String($credentials.baseUrl).trim()) ? String($credentials.baseUrl).trim().replace(/\\/+$/, "") : "https://invalid-base-url.wordsmith.ai") : "https://api.wordsmith.ai" }}/api/v1',
+			// A host off https wordsmith.ai resolves to one that fails the test, so the key never goes elsewhere.
+			baseURL: `={{ ${apiHostExpression('$credentials')} }}/api/v1`,
 			url: '/me',
 		},
 	};

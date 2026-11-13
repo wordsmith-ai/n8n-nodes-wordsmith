@@ -14,6 +14,8 @@ import type {
 } from 'n8n-workflow';
 import { NodeApiError, NodeOperationError, sleep } from 'n8n-workflow';
 
+import { WORDSMITH_HOST } from './hosts';
+
 export type WordsmithContext =
 	| IExecuteFunctions
 	| ILoadOptionsFunctions
@@ -57,20 +59,17 @@ export const authenticationProperties: INodeProperties[] = [
 ];
 
 /**
- * Wordsmith Trigger's Authentication field. It stays on API keys: an automatically registered OAuth2 client gets
- * the scopes the API advertises for `/api/v1`, which leave out the webhook scopes the trigger needs.
+ * Wordsmith Trigger's Authentication field. Versions 1 and 2 shipped defaulting to the API key, and a saved node
+ * omits a field left at its default, so they keep it. Version 3 defaults to OAuth2, now that the scopes the API
+ * lists for `/api/v1`, which a self-registered client receives, include the webhook scopes.
  */
-export const triggerAuthenticationProperties: INodeProperties[] = [1, 2].map((version) =>
-	authenticationField(version, 'apiKey', [
-		{ ...apiKeyOption, name: 'API Key (Recommended)' },
-		{
-			name: 'OAuth2',
-			value: 'oAuth2',
-			description:
-				'Works only with a client that was granted webhooks:read and webhooks:write, such as a company app',
-		},
-	]),
-);
+export const triggerAuthenticationProperties: INodeProperties[] = [
+	...[1, 2].map((version) => authenticationField(version, 'apiKey', [apiKeyOption, oAuth2Option])),
+	authenticationField(3, 'oAuth2', [oAuth2Option, apiKeyOption]),
+];
+
+/** Wordsmith Trigger's versions: 3 moves the default to OAuth2 without changing saved version-2 nodes. */
+export const TRIGGER_VERSIONS = { version: [1, 2, 3], defaultVersion: 3 };
 
 /**
  * Version 1 is kept so n8n recognises a Wordsmith node saved with the package's 0.1.0, the only release that
@@ -108,7 +107,7 @@ export function credentialName(this: WordsmithContext): string {
 }
 
 /** Keep in step with package.json; a test checks it. */
-export const PACKAGE_VERSION = '0.2.0';
+export const PACKAGE_VERSION = '0.3.0';
 export const INTEGRATION_HEADER = { 'Wordsmith-Integration': `n8n/${PACKAGE_VERSION}` };
 
 const REGION_HOSTS: Record<string, string> = {
@@ -122,25 +121,30 @@ const REGION_HOSTS: Record<string, string> = {
  */
 export function customHost(value: unknown): string | undefined {
 	if (typeof value !== 'string') return undefined;
-	let url: URL;
-	try {
-		url = new URL(value.trim());
-	} catch {
-		return undefined;
-	}
-	const onWordsmith = url.hostname === 'wordsmith.ai' || url.hostname.endsWith('.wordsmith.ai');
-	return url.protocol === 'https:' && onWordsmith && !url.username && !url.password
-		? `https://${url.host}`
-		: undefined;
+	const match = value.trim().match(WORDSMITH_HOST);
+	return match ? `https://${match[1].toLowerCase()}${match[2] ?? ''}` : undefined;
 }
 
-/** The `/api/v1` root for the credential's region, or its custom host. */
+/**
+ * The `/api/v1` root: the credential's API Host when Use a Custom Host is on, else a 0.2.0 credential's region or custom Base URL, else the
+ * EU host, which forwards a request for a customer held in another region to that region.
+ */
 export function apiBaseUrl(credentials: IDataObject): string {
+	if (credentials.useCustomHost === true) {
+		const host = customHost(credentials.apiHost);
+		if (!host) {
+			throw new Error(
+				'Set the API Host in the Wordsmith credential to an https address on wordsmith.ai, such as https://api.us.wordsmith.ai, or turn off Use a Custom Host.',
+			);
+		}
+		return `${host}/api/v1`;
+	}
 	const region = (credentials.region as string | undefined) ?? 'eu';
 	const host = region === 'custom' ? customHost(credentials.baseUrl) : REGION_HOSTS[region];
 	if (!host) {
+		// The 0.2.0 field is hidden, so the user can only override it.
 		throw new Error(
-			'Set the Base URL in the Wordsmith credential to an https address on wordsmith.ai, such as https://api.wordsmith.ai.',
+			'This Wordsmith credential holds a host saved by an earlier version of the node, and it is not an https address on wordsmith.ai. Turn on Use a Custom Host in the credential and set the API Host, and on an OAuth2 credential the App Host, to replace it. The pre-filled hosts work for every Wordsmith organisation.',
 		);
 	}
 	return `${host}/api/v1`;
@@ -203,7 +207,21 @@ export function errorMessage(
 				: undefined;
 	const message =
 		apiMessage ?? oauthMessage ?? `Wordsmith answered with status ${response.statusCode}`;
-	return { message, description: code ? `Error code: ${code}` : undefined };
+	// Over OAuth a missing scope is RFC 6750's `{error: 'insufficient_scope'}`, not the API's `error_code`.
+	const oauthCode = typeof body.error === 'string' ? body.error : undefined;
+	if (
+		credential === SIGN_IN_CREDENTIAL &&
+		(code ?? oauthCode) === 'insufficient_scope' &&
+		response.statusCode === 403
+	) {
+		return {
+			message,
+			description:
+				'Open the Wordsmith OAuth2 API credential and select Connect my account to approve the missing scope.',
+		};
+	}
+	const shownCode = code ?? (oauthMessage !== undefined ? oauthCode : undefined);
+	return { message, description: shownCode ? `Error code: ${shownCode}` : undefined };
 }
 
 export function toNodeApiError(

@@ -9,7 +9,10 @@ const {
 	pollFor,
 	newItems,
 } = require('../dist/nodes/WordsmithPollingTrigger/WordsmithPollingTrigger.node.js');
-const { TRIGGERS } = require('../dist/nodes/WordsmithTrigger/WordsmithTrigger.node.js');
+const {
+	TRIGGERS,
+	WordsmithTrigger,
+} = require('../dist/nodes/WordsmithTrigger/WordsmithTrigger.node.js');
 
 // The core tier of the shared automation-connectors catalogue (version 2). Operation values are its keys.
 const CORE_ACTIONS = [
@@ -30,7 +33,47 @@ const CORE_ACTIONS = [
 	'find_task',
 	'get_operation',
 ];
+// The extended actions and searches of the catalogue, all of which this node ships.
+const EXTENDED_ACTIONS = [
+	'import_file_from_url',
+	'create_document',
+	'get_file_text',
+	'translate_document',
+	'redact_document',
+	'accept_all_changes',
+	'merge_pdfs',
+	'generate_review_redline',
+	'reply_to_task_requester',
+	'get_task_files',
+	'create_report',
+	'add_report_rows',
+	'run_report',
+	'export_report',
+	'add_documents_to_repository',
+	'search_documents',
+	'search_legal_sources',
+	'find_agent',
+	'find_user',
+	'find_conversation',
+	'find_report',
+	'find_repository',
+	'get_report_answers',
+	'get_conversation_messages',
+	'get_legal_source_document',
+	'cancel_operation',
+];
 const CORE_TRIGGERS = ['task_created', 'task_assigned', 'task_status_changed', 'review_completed'];
+// The extended triggers this node ships, under their catalogue keys.
+const EXTENDED_TRIGGERS = [
+	'task_comment_added',
+	'agent_waiting_for_input',
+	'agent_input_resolved',
+	'repository_documents_added',
+	'repository_indexing_completed',
+	'report_run_completed',
+	'job_finished',
+	'any_event',
+];
 
 describe('Wordsmith node', () => {
 	const description = new Wordsmith().description;
@@ -38,9 +81,10 @@ describe('Wordsmith node', () => {
 		.filter((property) => property.name === 'operation')
 		.flatMap((property) => property.options.map((option) => option.value));
 
-	it('offers every core catalogue action, under its catalogue key', () => {
-		assert.deepEqual([...operations].sort(), [...CORE_ACTIONS].sort());
-		assert.deepEqual(Object.keys(OPERATIONS).sort(), [...CORE_ACTIONS].sort());
+	it('offers every core and extended catalogue action, under its catalogue key', () => {
+		const expected = [...CORE_ACTIONS, ...EXTENDED_ACTIONS].sort();
+		assert.deepEqual([...operations].sort(), expected);
+		assert.deepEqual(Object.keys(OPERATIONS).sort(), expected);
 	});
 
 	it('can be used as an AI agent tool', () => {
@@ -49,22 +93,26 @@ describe('Wordsmith node', () => {
 });
 
 describe('Wordsmith Trigger', () => {
-	it('covers every core trigger', () => {
-		for (const key of CORE_TRIGGERS) assert.ok(TRIGGERS[key], key);
+	it('offers every core trigger and the extended ones, under their catalogue keys', () => {
+		const expected = [...CORE_TRIGGERS, ...EXTENDED_TRIGGERS].sort();
+		assert.deepEqual(Object.keys(TRIGGERS).sort(), expected);
+		const options = new WordsmithTrigger().description.properties.find((p) => p.name === 'event');
+		assert.deepEqual(options.options.map((o) => o.value).sort(), expected);
 		assert.deepEqual(TRIGGERS.task_assigned.eventTypes, ['task.created', 'task.assigned']);
 	});
 
-	it('reads the task or review an event names', () => {
-		assert.deepEqual(TRIGGERS.task_assigned.enrich({ task_id: 't 1' }), {
-			key: 'task',
-			id: 't 1',
-			path: '/tasks/t%201',
-		});
-		assert.deepEqual(TRIGGERS.review_completed.enrich({ review_id: 'r1' }), {
-			key: 'review',
-			id: 'r1',
-			path: '/reviews/r1',
-		});
+	it('reads the resources an event names', () => {
+		assert.deepEqual(TRIGGERS.task_assigned.reads({ task_id: 't 1' }), [
+			{ key: 'task', id: 't 1', path: '/tasks/t%201' },
+		]);
+		assert.deepEqual(TRIGGERS.review_completed.reads({ review_id: 'r1' }), [
+			{ key: 'review', id: 'r1', path: '/reviews/r1' },
+		]);
+		assert.deepEqual(TRIGGERS.task_comment_added.reads({ task_id: 't1', comment_id: 'c1' }), [
+			{ key: 'task', id: 't1', path: '/tasks/t1' },
+			{ key: 'comment', id: 'c1', path: '/tasks/t1/comments', find: 'c1' },
+		]);
+		assert.equal(TRIGGERS.agent_waiting_for_input.reads, undefined);
 	});
 });
 

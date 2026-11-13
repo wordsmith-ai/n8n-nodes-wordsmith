@@ -1,6 +1,6 @@
 import type { INodeProperties } from 'n8n-workflow';
 
-import { fileInput, outputBinaryField, show, waitProperties } from './common';
+import { fileInput, filesOptions, outputBinaryField, show, waitProperties } from './common';
 
 export const fileProperties: INodeProperties[] = [
 	{
@@ -11,10 +11,29 @@ export const fileProperties: INodeProperties[] = [
 		displayOptions: { show: { resource: ['file'] } },
 		options: [
 			{
+				name: 'Create From Text',
+				value: 'create_document',
+				action: 'Create a document from text',
+				description:
+					'Create a text, Markdown or Word file from text. Markdown headings, lists and tables become Word formatting.',
+			},
+			{
 				name: 'Get',
 				value: 'get_file',
 				action: 'Get a file',
 				description: 'Get a Wordsmith file and its contents, to use in later steps',
+			},
+			{
+				name: 'Get Text',
+				value: 'get_file_text',
+				action: 'Get the text of a file',
+				description: 'Get the plain text of a Wordsmith file',
+			},
+			{
+				name: 'Import From Link',
+				value: 'import_file_from_url',
+				action: 'Import a file from a link',
+				description: 'Copy a file from a public https link into your private Wordsmith space',
 			},
 			{
 				name: 'Upload',
@@ -50,12 +69,105 @@ export const fileProperties: INodeProperties[] = [
 		required: true,
 		default: '',
 		description: 'The ID of a file in Wordsmith',
-		displayOptions: show('file', ['get_file']),
+		displayOptions: show('file', ['get_file', 'get_file_text']),
 	},
 	outputBinaryField('file', ['get_file']),
+	{
+		displayName: 'Maximum Characters',
+		name: 'maxChars',
+		type: 'number',
+		typeOptions: { minValue: 1, maxValue: 100000 },
+		default: 20000,
+		description: 'How much text to return, up to 100,000 characters',
+		displayOptions: show('file', ['get_file_text']),
+	},
+	{
+		displayName: 'Start At Character',
+		name: 'offset',
+		type: 'number',
+		typeOptions: { minValue: 0 },
+		default: 0,
+		description:
+			'Where to start reading. Pass the previous result’s next_offset to read the next part.',
+		displayOptions: show('file', ['get_file_text']),
+	},
+	{
+		displayName: 'Link',
+		name: 'url',
+		type: 'string',
+		required: true,
+		default: '',
+		placeholder: 'e.g. https://example.com/contract.pdf',
+		description: 'A public https link, up to 100 MB',
+		displayOptions: show('file', ['import_file_from_url']),
+	},
+	{
+		displayName: 'File Name',
+		name: 'fileName',
+		type: 'string',
+		default: '',
+		placeholder: 'e.g. contract.pdf',
+		description: 'Defaults to the name in the link',
+		displayOptions: show('file', ['import_file_from_url']),
+	},
+	{
+		displayName: 'File Name',
+		name: 'fileName',
+		type: 'string',
+		required: true,
+		default: '',
+		placeholder: 'e.g. Board minutes',
+		displayOptions: show('file', ['create_document']),
+	},
+	{
+		displayName: 'Text',
+		name: 'content',
+		type: 'string',
+		required: true,
+		typeOptions: { rows: 6 },
+		default: '',
+		description: 'Up to 1,000,000 characters',
+		displayOptions: show('file', ['create_document']),
+	},
+	{
+		displayName: 'Format',
+		name: 'format',
+		type: 'options',
+		options: [
+			{ name: 'Word', value: 'docx' },
+			{ name: 'Markdown', value: 'md' },
+			{ name: 'Plain Text', value: 'txt' },
+		],
+		default: 'docx',
+		displayOptions: show('file', ['create_document']),
+	},
 ];
 
-const DOCUMENT_OPS = ['redline_document', 'compare_documents', 'convert_document'];
+const REDACTION_CATEGORIES = [
+	{ name: 'Addresses', value: 'addresses' },
+	{ name: 'Email Addresses', value: 'emails' },
+	{ name: 'Financial Details', value: 'financial' },
+	{ name: 'ID Numbers', value: 'identifiers' },
+	{ name: 'Names', value: 'names' },
+	{ name: 'Phone Numbers', value: 'phone_numbers' },
+];
+
+const DOCUMENT_OPS = [
+	'redline_document',
+	'compare_documents',
+	'convert_document',
+	'translate_document',
+	'redact_document',
+	'accept_all_changes',
+	'merge_pdfs',
+];
+const ONE_DOCUMENT_OPS = [
+	'redline_document',
+	'convert_document',
+	'translate_document',
+	'redact_document',
+	'accept_all_changes',
+];
 
 export const documentProperties: INodeProperties[] = [
 	{
@@ -65,6 +177,12 @@ export const documentProperties: INodeProperties[] = [
 		noDataExpression: true,
 		displayOptions: { show: { resource: ['document'] } },
 		options: [
+			{
+				name: 'Accept All Changes',
+				value: 'accept_all_changes',
+				action: 'Accept all tracked changes',
+				description: 'Accept every tracked change in a Word document, for a clean copy',
+			},
 			{
 				name: 'Compare',
 				value: 'compare_documents',
@@ -78,11 +196,30 @@ export const documentProperties: INodeProperties[] = [
 				description: 'Convert a Word document to PDF, or a PDF to Word',
 			},
 			{
+				name: 'Merge Into PDF',
+				value: 'merge_pdfs',
+				action: 'Merge documents into one PDF',
+				description: 'Join documents into one PDF, in the order given',
+			},
+			{
+				name: 'Redact',
+				value: 'redact_document',
+				action: 'Redact a document',
+				description: 'Black out personal data and any terms you list',
+			},
+			{
 				name: 'Redline',
 				value: 'redline_document',
 				action: 'Redline a document',
 				description:
 					'Make edits to a Word document as tracked changes, from instructions in plain language',
+			},
+			{
+				name: 'Translate',
+				value: 'translate_document',
+				action: 'Translate a document',
+				description:
+					'Translate a PDF, Word, PowerPoint or Excel file. The source language is detected.',
 			},
 		],
 		default: 'redline_document',
@@ -91,8 +228,63 @@ export const documentProperties: INodeProperties[] = [
 		'document',
 		'Document',
 		'The document to work on',
-		show('document', ['redline_document', 'convert_document']),
+		show('document', ONE_DOCUMENT_OPS),
 	),
+	{
+		displayName: 'Translate Into',
+		name: 'targetLanguage',
+		type: 'string',
+		required: true,
+		default: '',
+		placeholder: 'e.g. de',
+		description: 'A language code such as de, fr, ja, en-gb, pt-br or zh-hans',
+		displayOptions: show('document', ['translate_document']),
+	},
+	{
+		displayName: 'What to Redact',
+		name: 'categories',
+		type: 'multiOptions',
+		options: REDACTION_CATEGORIES,
+		default: [],
+		description: 'The kinds of personal data to black out. Set these, Terms to Redact, or both.',
+		displayOptions: show('document', ['redact_document']),
+	},
+	{
+		displayName: 'Terms to Redact',
+		name: 'terms',
+		type: 'string',
+		default: '',
+		placeholder: 'e.g. Project Falcon, Acme Ltd',
+		description: 'Comma-separated words or phrases to black out, up to 100',
+		displayOptions: show('document', ['redact_document']),
+	},
+	{
+		displayName: 'Remove Editing Restrictions',
+		name: 'removeProtection',
+		type: 'boolean',
+		default: false,
+		description: 'Whether to also remove the document’s editing restrictions',
+		displayOptions: show('document', ['accept_all_changes']),
+	},
+	{
+		displayName: 'Documents',
+		name: 'documents',
+		type: 'collection',
+		placeholder: 'Add Documents',
+		default: {},
+		description:
+			'From 2 to 20 documents, merged in the order given: binary fields first, then file IDs',
+		displayOptions: show('document', ['merge_pdfs']),
+		options: filesOptions('The documents to merge.'),
+	},
+	{
+		displayName: 'File Name',
+		name: 'fileName',
+		type: 'string',
+		default: '',
+		placeholder: 'e.g. Signed bundle.pdf',
+		displayOptions: show('document', ['merge_pdfs']),
+	},
 	{
 		displayName: 'Instructions',
 		name: 'instructions',

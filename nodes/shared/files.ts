@@ -73,12 +73,12 @@ export async function collectFileIds(
 	binaryFields: unknown,
 	fileIds: unknown,
 ): Promise<string[]> {
-	const ids = splitList(fileIds);
+	const ids: string[] = [];
 	for (const field of splitList(binaryFields)) {
 		const file = await uploadBinary.call(this, itemIndex, field);
 		ids.push(String(file.id));
 	}
-	return ids;
+	return [...ids, ...splitList(fileIds)];
 }
 
 /** The file id for a single-file input, uploading the binary field when the source is binary. */

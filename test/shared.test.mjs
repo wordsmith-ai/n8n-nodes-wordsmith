@@ -59,6 +59,58 @@ describe('apiBaseUrl', () => {
 	});
 });
 
+describe('apiBaseUrl with an API Host', () => {
+	it('uses the API Host when the toggle is on, and ignores it when the toggle is off', () => {
+		assert.equal(
+			transport.apiBaseUrl({ useCustomHost: true, apiHost: 'https://api.us.wordsmith.ai/' }),
+			'https://api.us.wordsmith.ai/api/v1',
+		);
+		assert.equal(
+			transport.apiBaseUrl({
+				useCustomHost: false,
+				apiHost: 'https://api.us.wordsmith.ai',
+				region: 'eu',
+			}),
+			'https://api.wordsmith.ai/api/v1',
+		);
+		assert.equal(
+			transport.apiBaseUrl({
+				useCustomHost: true,
+				apiHost: 'https://staging.api.wordsmith.ai',
+				region: 'us',
+			}),
+			'https://staging.api.wordsmith.ai/api/v1',
+		);
+	});
+
+	it('lets an API Host replace a bad host saved by 0.2.0, and says so when none is set', () => {
+		const saved = { region: 'custom', baseUrl: 'http://staging.api.wordsmith.ai' };
+		const message = (credentials) => {
+			try {
+				transport.apiBaseUrl(credentials);
+			} catch (error) {
+				return error.message;
+			}
+			return undefined;
+		};
+		assert.ok(message(saved));
+		assert.notEqual(
+			message(saved),
+			message({ useCustomHost: true, apiHost: 'http://api.wordsmith.ai' }),
+		);
+		assert.equal(
+			transport.apiBaseUrl({ ...saved, useCustomHost: true, apiHost: 'https://api.wordsmith.ai' }),
+			'https://api.wordsmith.ai/api/v1',
+		);
+	});
+
+	it('refuses an API Host that is not https on wordsmith.ai', () => {
+		for (const apiHost of ['http://api.wordsmith.ai', 'https://evil.example.com', 'not a url']) {
+			assert.throws(() => transport.apiBaseUrl({ useCustomHost: true, apiHost }), Error, apiHost);
+		}
+	});
+});
+
 describe('errors and retries', () => {
 	it('retries only 429, 503 and the two retryable 409s', () => {
 		const retryable = (statusCode, error_code) =>
@@ -89,6 +141,28 @@ describe('errors and retries', () => {
 		});
 		assert.notEqual(refused.message, 'Invalid API key');
 		assert.equal(typeof refused.description, 'string');
+	});
+
+	it('reads an OAuth 403 body, which carries error and error_description instead of error_code and message', () => {
+		const oauthBody = {
+			error: 'insufficient_scope',
+			error_description: 'This needs the reports:write scope. Reconnect the app and approve it.',
+		};
+		const response = { statusCode: 403, headers: {}, body: oauthBody };
+		const onOAuth = transport.errorMessage(response, 'wordsmithOAuth2Api');
+		assert.equal(onOAuth.message, oauthBody.error_description);
+		assert.equal(typeof onOAuth.description, 'string');
+		assert.notEqual(onOAuth.description, 'Error code: insufficient_scope');
+		// The same OAuth error shape on another status still names its code.
+		const other = transport.errorMessage({
+			statusCode: 400,
+			headers: {},
+			body: { error: 'invalid_request', error_description: 'Bad resource.' },
+		});
+		assert.deepEqual(other, {
+			message: 'Bad resource.',
+			description: 'Error code: invalid_request',
+		});
 	});
 
 	it('keeps Retry-After between 1 and 60 seconds', () => {

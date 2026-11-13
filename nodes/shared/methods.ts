@@ -67,6 +67,39 @@ export async function searchBlueprints(
 	return { results: matching(page.items), paginationToken: page.cursor ?? undefined };
 }
 
+/** A paged list route searched by name with `query`, one page per call. */
+async function searchPaged(
+	this: ILoadOptionsFunctions,
+	path: string,
+	filter?: string,
+	paginationToken?: string,
+): Promise<INodeListSearchResult> {
+	const qs: IDataObject = { limit: 100 };
+	if (filter?.trim()) qs.query = filter.trim();
+	if (paginationToken) qs.cursor = paginationToken;
+	const page = (await wordsmithApi.call(this, 'GET', path, { qs })) as unknown as {
+		items: Named[];
+		cursor: string | null;
+	};
+	return { results: matching(page.items), paginationToken: page.cursor ?? undefined };
+}
+
+export async function searchReports(
+	this: ILoadOptionsFunctions,
+	filter?: string,
+	paginationToken?: string,
+): Promise<INodeListSearchResult> {
+	return await searchPaged.call(this, '/reports', filter, paginationToken);
+}
+
+export async function searchRepositories(
+	this: ILoadOptionsFunctions,
+	filter?: string,
+	paginationToken?: string,
+): Promise<INodeListSearchResult> {
+	return await searchPaged.call(this, '/repositories', filter, paginationToken);
+}
+
 export async function searchUsers(
 	this: ILoadOptionsFunctions,
 	filter?: string,

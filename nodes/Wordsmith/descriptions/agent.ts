@@ -29,6 +29,12 @@ export const agentProperties: INodeProperties[] = [
 					'Ask a Wordsmith agent a question or give it an instruction, with optional files, and wait for the answer',
 			},
 			{
+				name: 'Find',
+				value: 'find_agent',
+				action: 'Find an agent',
+				description: 'Get the agents whose name contains your search',
+			},
+			{
 				name: 'Get Answer',
 				value: 'get_question',
 				action: 'Get an answer',
@@ -114,5 +120,14 @@ export const agentProperties: INodeProperties[] = [
 					'Whether to download the files the agent created, such as a redline, into the output’s binary fields',
 			},
 		],
+	},
+	{
+		displayName: 'Name Contains',
+		name: 'name',
+		type: 'string',
+		required: true,
+		default: '',
+		placeholder: 'e.g. NDA',
+		displayOptions: show('agent', ['find_agent']),
 	},
 ];

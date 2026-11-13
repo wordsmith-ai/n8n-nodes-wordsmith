@@ -3,6 +3,7 @@
 	"nodeVersion": "2.0",
 	"codexVersion": "1.0",
 	"categories": ["Productivity"],
+	"alias": ["webhook", "task", "comment", "review", "approval", "repository", "report", "job"],
 	"resources": {
 		"credentialDocumentation": [
 			{

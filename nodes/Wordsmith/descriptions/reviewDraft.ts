@@ -18,6 +18,12 @@ export const reviewProperties: INodeProperties[] = [
 		displayOptions: { show: { resource: ['review'] } },
 		options: [
 			{
+				name: 'Create Redline',
+				value: 'generate_review_redline',
+				action: 'Create a redline from a review',
+				description: 'Turn a review’s findings into tracked changes on the reviewed document',
+			},
+			{
 				name: 'Find',
 				value: 'get_review',
 				action: 'Find a review',
@@ -95,7 +101,36 @@ export const reviewProperties: INodeProperties[] = [
 			show: { resource: ['review'], operation: ['run_review'], reviewType: ['counterparty_edits'] },
 		},
 	},
-	...waitProperties('review', ['run_review']),
+	{
+		displayName: 'Review ID',
+		name: 'reviewId',
+		type: 'string',
+		required: true,
+		default: '',
+		description: 'The ID of a finished review, such as one Review a Document returned',
+		displayOptions: show('review', ['generate_review_redline']),
+	},
+	{
+		displayName: 'Finding IDs',
+		name: 'findingIds',
+		type: 'string',
+		default: '',
+		placeholder: 'e.g. 3c1f2a9e-…, 9a2b7c1d-…',
+		description:
+			'Comma-separated findings to apply. Leave empty to use every finding with a recommendation.',
+		displayOptions: show('review', ['generate_review_redline']),
+	},
+	...waitProperties('review', ['run_review', 'generate_review_redline']),
+	{
+		...outputBinaryField('review', ['generate_review_redline']),
+		displayOptions: {
+			show: {
+				resource: ['review'],
+				operation: ['generate_review_redline'],
+				waitForResult: [true],
+			},
+		},
+	},
 	{
 		displayName: 'Download Redline',
 		name: 'downloadRedline',

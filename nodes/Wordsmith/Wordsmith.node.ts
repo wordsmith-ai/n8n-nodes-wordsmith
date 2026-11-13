@@ -14,6 +14,8 @@ import {
 	searchAgents,
 	searchBlueprints,
 	searchPlaybooks,
+	searchReports,
+	searchRepositories,
 	searchTaskAgents,
 	searchUsers,
 } from '../shared/methods';
@@ -22,6 +24,13 @@ import { OPERATIONS } from './actions';
 import { agentProperties } from './descriptions/agent';
 import { documentProperties, fileProperties } from './descriptions/fileDocument';
 import { draftProperties, reviewProperties } from './descriptions/reviewDraft';
+import {
+	conversationProperties,
+	reportProperties,
+	repositoryProperties,
+	searchProperties,
+	userProperties,
+} from './descriptions/knowledge';
 import { jobProperties, taskProperties } from './descriptions/taskJob';
 
 /**
@@ -41,7 +50,7 @@ export class Wordsmith implements INodeType {
 		...NODE_VERSIONS,
 		subtitle: '={{$parameter["operation"]}}',
 		description:
-			'Ask Wordsmith legal agents, review, redline, compare and draft documents, and manage tasks',
+			'Ask Wordsmith legal agents, review, redline, translate and draft documents, run reports, search your documents and legal sources, and manage tasks',
 		defaults: { name: 'Wordsmith' },
 		usableAsTool: true,
 		inputs: [NodeConnectionTypes.Main],
@@ -64,22 +73,32 @@ export class Wordsmith implements INodeType {
 				noDataExpression: true,
 				options: [
 					{ name: 'Agent', value: 'agent' },
+					{ name: 'Conversation', value: 'conversation' },
 					{ name: 'Document', value: 'document' },
 					{ name: 'Draft', value: 'draft' },
 					{ name: 'File', value: 'file' },
 					{ name: 'Job', value: 'job' },
+					{ name: 'Report', value: 'report' },
+					{ name: 'Repository', value: 'repository' },
 					{ name: 'Review', value: 'review' },
+					{ name: 'Search', value: 'search' },
 					{ name: 'Task', value: 'task' },
+					{ name: 'User', value: 'user' },
 				],
 				default: 'agent',
 			},
 			...agentProperties,
+			...conversationProperties,
 			...documentProperties,
 			...draftProperties,
 			...fileProperties,
 			...jobProperties,
+			...reportProperties,
+			...repositoryProperties,
 			...reviewProperties,
+			...searchProperties,
 			...taskProperties,
+			...userProperties,
 		],
 	};
 
@@ -88,6 +107,8 @@ export class Wordsmith implements INodeType {
 			searchAgents,
 			searchBlueprints,
 			searchPlaybooks,
+			searchReports,
+			searchRepositories,
 			searchTaskAgents,
 			searchUsers,
 		},

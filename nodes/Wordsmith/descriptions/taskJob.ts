@@ -97,6 +97,19 @@ export const taskProperties: INodeProperties[] = [
 				description: 'Get a task by its ID or number, or the first task that matches your search',
 			},
 			{
+				name: 'Get Files',
+				value: 'get_task_files',
+				action: 'Get the files of a task',
+				description: 'Get the files a task holds: what it was given and what was produced',
+			},
+			{
+				name: 'Reply to Requester',
+				value: 'reply_to_task_requester',
+				action: 'Reply to the person who sent a task',
+				description:
+					'Send a reply to whoever raised the task, through the channel it came from, such as email',
+			},
+			{
 				name: 'Update',
 				value: 'update_task',
 				action: 'Update a task',
@@ -158,7 +171,13 @@ export const taskProperties: INodeProperties[] = [
 			},
 		],
 	},
-	taskIdProperty(['update_task', 'add_task_comment', 'attach_files_to_task']),
+	taskIdProperty([
+		'update_task',
+		'add_task_comment',
+		'attach_files_to_task',
+		'reply_to_task_requester',
+		'get_task_files',
+	]),
 	{
 		displayName: 'Update Fields',
 		name: 'updateFields',
@@ -204,13 +223,36 @@ export const taskProperties: INodeProperties[] = [
 		displayOptions: show('task', ['add_task_comment']),
 	},
 	{
+		displayName: 'Reply',
+		name: 'content',
+		type: 'string',
+		required: true,
+		typeOptions: { rows: 4 },
+		default: '',
+		description: 'The reply the requester receives',
+		displayOptions: show('task', ['reply_to_task_requester']),
+	},
+	{
 		displayName: 'Files',
 		name: 'files',
 		type: 'collection',
 		placeholder: 'Add Files',
 		default: {},
-		displayOptions: show('task', ['add_task_comment', 'attach_files_to_task']),
+		displayOptions: show('task', [
+			'add_task_comment',
+			'attach_files_to_task',
+			'reply_to_task_requester',
+		]),
 		options: filesOptions('Files to add.'),
+	},
+	{
+		displayName: 'Download Files',
+		name: 'downloadFiles',
+		type: 'boolean',
+		default: false,
+		description:
+			'Whether to download each file into a binary field: input_0, input_1… for what the task was given, output_0, output_1… for what it produced',
+		displayOptions: show('task', ['get_task_files']),
 	},
 	taskIdProperty(['find_task'], false),
 	{
@@ -247,6 +289,12 @@ export const jobProperties: INodeProperties[] = [
 		displayOptions: { show: { resource: ['job'] } },
 		options: [
 			{
+				name: 'Cancel',
+				value: 'cancel_operation',
+				action: 'Cancel a job',
+				description: 'Stop a background job that has not finished',
+			},
+			{
 				name: 'Get',
 				value: 'get_operation',
 				action: 'Get a job',
@@ -262,6 +310,6 @@ export const jobProperties: INodeProperties[] = [
 		required: true,
 		default: '',
 		description: 'The operation_id an earlier step returned',
-		displayOptions: show('job', ['get_operation']),
+		displayOptions: show('job', ['get_operation', 'cancel_operation']),
 	},
 ];

@@ -26,11 +26,14 @@ their access.
   the REST API as its resource. On n8n Cloud, keep **Register Client Automatically** on: n8n registers itself with
   Wordsmith. On self-hosted n8n, use an API key, or turn it off and enter the client of an app your Wordsmith
   admin adds under **Settings → App access → Your organisation's apps**, with n8n's **OAuth Redirect URL**.
-  Wordsmith Trigger needs an API key connection for now, because an automatic registration gets no webhook scopes.
+  The connection includes the webhook scopes Wordsmith Trigger needs, unless your role doesn't allow webhook
+  endpoints. A connection made before Wordsmith offered them needs **Connect my account** once more.
 - **Wordsmith API**: an API key from Wordsmith **Settings → API keys**. It starts `sk-ws-api1-` and is shown
   once. n8n checks the key with `GET /api/v1/me`.
 
-Both take a region: **Europe** or **United States**. **Callback URL** needs an API key, because Wordsmith signs
+Neither asks for a region: `https://api.wordsmith.ai` reaches every Wordsmith organisation and forwards a request
+to the organisation's region. Turn on **Use a Custom Host** only to call the US region directly
+(set **API Host** to `https://api.us.wordsmith.ai`) or a test environment. **Callback URL** needs an API key, because Wordsmith signs
 callbacks with the key's webhook secret.
 
 ## Nodes
@@ -39,26 +42,33 @@ callbacks with the key's webhook secret.
 
 | Resource | Actions |
 | --- | --- |
-| Agent | Ask an agent · Get an answer |
-| File | Upload a file · Get a file |
-| Document | Redline a document · Compare two documents · Convert a document |
-| Review | Review a document · Find a review |
+| Agent | Ask an agent · Get an answer · Find an agent |
+| File | Upload a file · Import a file from a link · Create a document from text · Get a file · Get the text of a file |
+| Document | Redline · Compare · Convert · Translate · Redact · Accept all tracked changes · Merge into one PDF |
+| Review | Review a document · Find a review · Create a redline from a review |
 | Draft | Draft a document (from instructions, or a blueprint with one field per placeholder) |
-| Task | Create a task · Update a task · Add a comment to a task · Attach files to a task · Find a task |
-| Job | Get a job |
+| Task | Create · Update · Add a comment · Attach files · Find · Get the files of a task · Reply to the person who sent a task |
+| Report | Create · Add documents · Run · Export · Find · Get the answers in a report |
+| Repository | Add documents · Find a repository |
+| Search | Search your documents · Search legal sources · Get a legal source document |
+| Conversation | Find a conversation · Get the messages in a conversation |
+| User | Find a user |
+| Job | Get a job · Cancel a job |
 
-Long work, such as a review or a draft, runs as a Wordsmith job. The step waits for it, up to **Maximum
+Long work, such as a review, a draft, a translation, a report run or adding documents to a repository, runs as a Wordsmith job. The step waits for it, up to **Maximum
 Wait** (15 minutes), or returns the job at once for a workflow that waits with a Wait node and
 `{{ $execution.resumeUrl }}` as **Callback URL** (API key connections only). Each start call sends an idempotency key, so n8n's
 **Retry On Fail** never starts the work twice.
 
-**Wordsmith Trigger** starts a workflow on New task, Task assigned, Task status changed, Review completed,
-or any event types you choose. It registers a Wordsmith
-[webhook endpoint](https://docs.wordsmith.ai/webhook-endpoints) on activation, removes it on deactivation,
-and checks each request's `Wordsmith-Signature`. n8n must be reachable on a public https URL.
+**Wordsmith Trigger** starts a workflow on New task, Task assigned, Task status changed, New task comment,
+Review completed, Agent waiting for input, Agent input answered, Documents added to a repository, Repository
+indexing finished, Report run finished, Background job finished, or any event types you choose. It registers a
+Wordsmith [webhook endpoint](https://docs.wordsmith.ai/webhook-endpoints) on activation, named after the
+workflow, removes it on deactivation, and checks each request's `Wordsmith-Signature`. Each active workflow holds
+one endpoint, up to 100 per user. n8n must be reachable on a public https URL.
 
 **Wordsmith Polling Trigger** checks Wordsmith on a schedule for New task, Task status changed and Review
-completed, for organisations where instant triggers aren't on yet.
+completed, for an n8n that Wordsmith can't reach on a public URL.
 
 ## Compatibility
 

@@ -308,6 +308,38 @@ async function getFile(this: IExecuteFunctions, itemIndex: number): Promise<Resu
 	];
 }
 
+async function getFileText(this: IExecuteFunctions, itemIndex: number): Promise<Result> {
+	const fileId = String(this.getNodeParameter('fileId', itemIndex)).trim();
+	const qs: IDataObject = { max_chars: this.getNodeParameter('maxChars', itemIndex, 20000) };
+	const offset = this.getNodeParameter('offset', itemIndex, 0) as number;
+	if (offset > 0) qs.offset = offset;
+	return [
+		item.call(
+			this,
+			itemIndex,
+			await wordsmithApi.call(this, 'GET', `/files/${id(fileId)}/text`, { qs }),
+		),
+	];
+}
+
+async function importFileFromUrl(this: IExecuteFunctions, itemIndex: number): Promise<Result> {
+	const body: IDataObject = { url: String(this.getNodeParameter('url', itemIndex)).trim() };
+	const fileName = (this.getNodeParameter('fileName', itemIndex, '') as string).trim();
+	if (fileName) body.file_name = fileName;
+	return [
+		item.call(this, itemIndex, await wordsmithApi.call(this, 'POST', '/files/import', { body })),
+	];
+}
+
+async function createDocument(this: IExecuteFunctions, itemIndex: number): Promise<Result> {
+	const body: IDataObject = {
+		file_name: String(this.getNodeParameter('fileName', itemIndex)).trim(),
+		content: this.getNodeParameter('content', itemIndex) as string,
+		format: this.getNodeParameter('format', itemIndex, 'docx'),
+	};
+	return [item.call(this, itemIndex, await wordsmithApi.call(this, 'POST', '/files', { body }))];
+}
+
 async function documentAction(
 	this: IExecuteFunctions,
 	itemIndex: number,
@@ -320,6 +352,23 @@ async function documentAction(
 		body.original_file_id = await resolveFileInput.call(this, itemIndex, 'original');
 		body.revised_file_id = await resolveFileInput.call(this, itemIndex, 'revised');
 		body.output_format = this.getNodeParameter('outputFormat', itemIndex, 'docx');
+	} else if (operation === 'merge_pdfs') {
+		path = '/files/merge';
+		const documents = this.getNodeParameter('documents', itemIndex, {}) as IDataObject;
+		body.file_ids = await collectFileIds.call(
+			this,
+			itemIndex,
+			documents.binaryFields,
+			documents.fileIds,
+		);
+		if ((body.file_ids as string[]).length < 2) {
+			throw new NodeOperationError(this.getNode(), 'Merging needs at least two documents', {
+				itemIndex,
+				description: 'Under Documents, name binary fields or enter file IDs: from 2 to 20 in all.',
+			});
+		}
+		const fileName = (this.getNodeParameter('fileName', itemIndex, '') as string).trim();
+		if (fileName) body.file_name = fileName;
 	} else {
 		const fileId = await resolveFileInput.call(this, itemIndex, 'document');
 		if (operation === 'redline_document') {
@@ -328,6 +377,22 @@ async function documentAction(
 			const options = this.getNodeParameter('redlineOptions', itemIndex, {}) as IDataObject;
 			if (options.authorName) body.author_name = options.authorName;
 			if (options.actingParty) body.acting_party = options.actingParty;
+		} else if (operation === 'translate_document') {
+			path = `/files/${id(fileId)}/translate`;
+			body.target_language = String(this.getNodeParameter('targetLanguage', itemIndex)).trim();
+		} else if (operation === 'redact_document') {
+			path = `/files/${id(fileId)}/redact`;
+			body.categories = this.getNodeParameter('categories', itemIndex, []) as string[];
+			body.terms = splitList(this.getNodeParameter('terms', itemIndex, ''));
+			if ((body.categories as string[]).length === 0 && (body.terms as string[]).length === 0) {
+				throw new NodeOperationError(this.getNode(), 'Nothing to redact', {
+					itemIndex,
+					description: 'Choose What to Redact, enter Terms to Redact, or both.',
+				});
+			}
+		} else if (operation === 'accept_all_changes') {
+			path = `/files/${id(fileId)}/accept-changes`;
+			body.remove_protection = this.getNodeParameter('removeProtection', itemIndex, false);
 		} else {
 			path = `/files/${id(fileId)}/convert`;
 			body.target_format = this.getNodeParameter('targetFormat', itemIndex);
@@ -434,6 +499,32 @@ async function getReview(this: IExecuteFunctions, itemIndex: number): Promise<Re
 		: (this.getNodeParameter('limit', itemIndex, 50) as number);
 	const reviews = await wordsmithList.call(this, '/reviews', query ? { query } : {}, limit);
 	return reviews.map((review) => item.call(this, itemIndex, review));
+}
+
+async function generateReviewRedline(this: IExecuteFunctions, itemIndex: number): Promise<Result> {
+	const reviewId = String(this.getNodeParameter('reviewId', itemIndex)).trim();
+	const body: IDataObject = {};
+	const findingIds = splitList(this.getNodeParameter('findingIds', itemIndex, ''));
+	if (findingIds.length > 0) body.finding_ids = findingIds;
+	const { operation: started, settings } = await startJob.call(
+		this,
+		itemIndex,
+		`/reviews/${id(reviewId)}/redline`,
+		body,
+	);
+	if (!settings.wait) return [item.call(this, itemIndex, started)];
+	const finished = await finishOperation.call(this, itemIndex, started, settings.maxWaitSeconds);
+	const result = (finished.result ?? {}) as IDataObject;
+	const field = this.getNodeParameter('outputBinaryField', itemIndex, 'data') as string;
+	const output = await filesOutput.call(this, splitList(result.file_id), field);
+	return [
+		item.call(
+			this,
+			itemIndex,
+			{ ...output.json, review_id: reviewId, operation_id: finished.id },
+			output.binary,
+		),
+	];
 }
 
 /** Blueprint values from the mapper. Array fields typed as text are parsed as JSON. */
@@ -656,6 +747,46 @@ async function attachFilesToTask(this: IExecuteFunctions, itemIndex: number): Pr
 	];
 }
 
+async function replyToTaskRequester(this: IExecuteFunctions, itemIndex: number): Promise<Result> {
+	const taskId = this.getNodeParameter('taskId', itemIndex) as string;
+	const files = this.getNodeParameter('files', itemIndex, {}) as IDataObject;
+	const fileIds = await collectFileIds.call(this, itemIndex, files.binaryFields, files.fileIds);
+	const body: IDataObject = { content: this.getNodeParameter('content', itemIndex) as string };
+	if (fileIds.length > 0) body.file_ids = fileIds;
+	return [
+		item.call(
+			this,
+			itemIndex,
+			await wordsmithApi.call(this, 'POST', `/tasks/${taskRef(taskId)}/thread`, { body }),
+		),
+	];
+}
+
+async function getTaskFiles(this: IExecuteFunctions, itemIndex: number): Promise<Result> {
+	const taskId = this.getNodeParameter('taskId', itemIndex) as string;
+	const files = await wordsmithApi.call(this, 'GET', `/tasks/${taskRef(taskId)}/files`);
+	if (!(this.getNodeParameter('downloadFiles', itemIndex, false) as boolean)) {
+		return [item.call(this, itemIndex, files)];
+	}
+	const binary: IBinaryKeyData = {};
+	const taskPath = `/tasks/${taskRef(String(files.task_id ?? taskId))}/files`;
+	for (const [prefix, list] of [
+		['input', files.input_files],
+		['output', files.output_files],
+	] as const) {
+		for (const [index, file] of ((list as IDataObject[] | undefined) ?? []).entries()) {
+			const fileId = String(file.id);
+			const downloaded = await downloadFile.call(
+				this,
+				fileId,
+				`${taskPath}/${id(fileId)}/download`,
+			);
+			binary[`${prefix}_${index}`] = downloaded.binary;
+		}
+	}
+	return [item.call(this, itemIndex, files, binary)];
+}
+
 async function findTask(this: IExecuteFunctions, itemIndex: number): Promise<Result> {
 	const taskId = (this.getNodeParameter('taskId', itemIndex, '') as string).trim();
 	if (taskId) {
@@ -693,6 +824,344 @@ async function getOperation(this: IExecuteFunctions, itemIndex: number): Promise
 	];
 }
 
+// ── Agents, users and conversations ─────────────────────────────────────────────────
+
+function nameMatches(value: unknown, needle: string): boolean {
+	return typeof value === 'string' && value.toLowerCase().includes(needle);
+}
+
+async function findAgent(this: IExecuteFunctions, itemIndex: number): Promise<Result> {
+	const needle = String(this.getNodeParameter('name', itemIndex)).trim().toLowerCase();
+	const agents = (await wordsmithApi.call(this, 'GET', '/agents')) as unknown as IDataObject[];
+	return agents
+		.filter((agent) => nameMatches(agent.name, needle))
+		.map((agent) => item.call(this, itemIndex, agent));
+}
+
+/** An exact email match first; otherwise everyone whose name or email contains the search. */
+async function findUser(this: IExecuteFunctions, itemIndex: number): Promise<Result> {
+	const needle = String(this.getNodeParameter('query', itemIndex)).trim().toLowerCase();
+	const users = (await wordsmithApi.call(this, 'GET', '/users', {
+		qs: { active_only: 'true' },
+	})) as unknown as IDataObject[];
+	const exact = users.filter((user) => String(user.email ?? '').toLowerCase() === needle);
+	const matches =
+		exact.length > 0
+			? exact
+			: users.filter((user) => nameMatches(user.name, needle) || nameMatches(user.email, needle));
+	return matches.map((user) => item.call(this, itemIndex, user));
+}
+
+/** A `query` search over a paged list route, honouring Return All and Limit. */
+async function findPaged(
+	this: IExecuteFunctions,
+	itemIndex: number,
+	path: string,
+): Promise<Result> {
+	const query = String(this.getNodeParameter('query', itemIndex)).trim();
+	const returnAll = this.getNodeParameter('returnAll', itemIndex, false) as boolean;
+	const limit = returnAll
+		? Number.POSITIVE_INFINITY
+		: (this.getNodeParameter('limit', itemIndex, 50) as number);
+	const found = await wordsmithList.call(this, path, query ? { query } : {}, limit);
+	return found.map((entry) => item.call(this, itemIndex, entry));
+}
+
+async function findConversation(this: IExecuteFunctions, itemIndex: number): Promise<Result> {
+	return await findPaged.call(this, itemIndex, '/sessions');
+}
+
+async function getConversationMessages(
+	this: IExecuteFunctions,
+	itemIndex: number,
+): Promise<Result> {
+	const sessionId = String(this.getNodeParameter('sessionId', itemIndex)).trim();
+	const returnAll = this.getNodeParameter('returnAll', itemIndex, false) as boolean;
+	const limit = returnAll
+		? Number.POSITIVE_INFINITY
+		: (this.getNodeParameter('limit', itemIndex, 50) as number);
+	const messages = await wordsmithList.call(this, `/sessions/${id(sessionId)}/messages`, {}, limit);
+	return messages.map((message) => item.call(this, itemIndex, message));
+}
+
+// ── Reports and repositories ────────────────────────────────────────────────────────
+
+async function documentIds(this: IExecuteFunctions, itemIndex: number): Promise<string[]> {
+	const documents = this.getNodeParameter('documents', itemIndex, {}) as IDataObject;
+	return await collectFileIds.call(this, itemIndex, documents.binaryFields, documents.fileIds);
+}
+
+function noDocuments(this: IExecuteFunctions, itemIndex: number): NodeOperationError {
+	return new NodeOperationError(this.getNode(), 'No documents to add', {
+		itemIndex,
+		description: 'Under Documents, name a binary field or enter at least one file ID.',
+	});
+}
+
+async function createReport(this: IExecuteFunctions, itemIndex: number): Promise<Result> {
+	const columns = (
+		(this.getNodeParameter('columns', itemIndex, {}) as IDataObject).column as
+			| IDataObject[]
+			| undefined
+	)?.map((column) => {
+		const spec: IDataObject = { name: column.name, prompt: column.prompt, type: column.type };
+		const options = splitList(column.options);
+		if (options.length > 0) spec.options = options;
+		return spec;
+	});
+	const fileIds = await documentIds.call(this, itemIndex);
+	const body: IDataObject = {
+		name: this.getNodeParameter('name', itemIndex) as string,
+		columns: columns ?? [],
+		// The API refuses a run with no documents or no questions, and such a run would have nothing to fill in.
+		run:
+			(this.getNodeParameter('run', itemIndex, true) as boolean) &&
+			fileIds.length > 0 &&
+			(columns ?? []).length > 0,
+	};
+	if (fileIds.length > 0) body.file_ids = fileIds;
+	return [
+		item.call(
+			this,
+			itemIndex,
+			await wordsmithApi.call(this, 'POST', '/reports', {
+				body,
+				headers: startHeaders.call(this, itemIndex),
+			}),
+		),
+	];
+}
+
+async function addReportRows(this: IExecuteFunctions, itemIndex: number): Promise<Result> {
+	const reportId = locatorValue.call(this, 'report', itemIndex);
+	const fileIds = await documentIds.call(this, itemIndex);
+	if (fileIds.length === 0) throw noDocuments.call(this, itemIndex);
+	const added = await wordsmithApi.call(this, 'POST', `/reports/${id(reportId)}/rows`, {
+		body: { file_ids: fileIds },
+	});
+	const failed = splitList(added.failed_file_ids);
+	if (failed.length > 0 && failed.length === fileIds.length) {
+		throw withContext(
+			new NodeOperationError(this.getNode(), 'Wordsmith could not add any of the documents', {
+				itemIndex,
+				description: `Retry the step. Files not added: ${failed.join(', ')}.`,
+			}),
+			{ report_id: reportId, failed_file_ids: failed },
+		);
+	}
+	return [item.call(this, itemIndex, { report_id: reportId, ...added })];
+}
+
+async function runReport(this: IExecuteFunctions, itemIndex: number): Promise<Result> {
+	const reportId = locatorValue.call(this, 'report', itemIndex);
+	const { operation: started, settings } = await startJob.call(
+		this,
+		itemIndex,
+		`/reports/${id(reportId)}/runs`,
+		{ only_empty: this.getNodeParameter('onlyEmpty', itemIndex, true) },
+	);
+	if (!settings.wait) return [item.call(this, itemIndex, started)];
+	const finished = await finishOperation.call(this, itemIndex, started, settings.maxWaitSeconds);
+	const result = (finished.result ?? {}) as IDataObject;
+	return [
+		item.call(this, itemIndex, {
+			report_id: reportId,
+			cells_completed: result.cells_completed ?? null,
+			cells_total: result.cells_total ?? null,
+			operation_id: finished.id,
+		}),
+	];
+}
+
+async function exportReport(this: IExecuteFunctions, itemIndex: number): Promise<Result> {
+	const reportId = locatorValue.call(this, 'report', itemIndex);
+	const { operation: started, settings } = await startJob.call(
+		this,
+		itemIndex,
+		`/reports/${id(reportId)}/exports`,
+		{ format: this.getNodeParameter('format', itemIndex, 'xlsx') },
+	);
+	if (!settings.wait) return [item.call(this, itemIndex, started)];
+	const finished = await finishOperation.call(this, itemIndex, started, settings.maxWaitSeconds);
+	const result = (finished.result ?? {}) as IDataObject;
+	const field = this.getNodeParameter('outputBinaryField', itemIndex, 'data') as string;
+	const output = await filesOutput.call(this, splitList(result.file_id), field);
+	return [
+		item.call(
+			this,
+			itemIndex,
+			{ ...output.json, report_id: reportId, operation_id: finished.id },
+			output.binary,
+		),
+	];
+}
+
+/** Each column's key in the answers: its name, or `name (id)` when another column has the same name. */
+export function answerKeys(columns: IDataObject[]): Map<string, string> {
+	const counts = new Map<string, number>();
+	for (const column of columns) {
+		const name = String(column.name);
+		counts.set(name, (counts.get(name) ?? 0) + 1);
+	}
+	return new Map(
+		columns.map((column) => {
+			const name = String(column.name);
+			const key = (counts.get(name) ?? 0) > 1 ? `${name} (${String(column.id)})` : name;
+			return [String(column.id), key];
+		}),
+	);
+}
+
+/** Every row of a report with its answers keyed by column name, one item per row. */
+async function getReportAnswers(this: IExecuteFunctions, itemIndex: number): Promise<Result> {
+	const reportId = locatorValue.call(this, 'report', itemIndex);
+	const path = `/reports/${id(reportId)}`;
+	const report = await wordsmithApi.call(this, 'GET', path);
+	const columns = answerKeys((report.columns as IDataObject[] | undefined) ?? []);
+	const all = Number.POSITIVE_INFINITY;
+	const rows = await wordsmithList.call(this, `${path}/rows`, {}, all);
+	const cells = await wordsmithList.call(this, `${path}/cells`, {}, all);
+	const byRow = new Map<string, IDataObject[]>();
+	for (const cell of cells) {
+		const rowId = String(cell.row_id);
+		byRow.set(rowId, [...(byRow.get(rowId) ?? []), cell]);
+	}
+	return rows.map((row) => {
+		const answers: IDataObject = {};
+		const statuses: IDataObject = {};
+		for (const cell of byRow.get(String(row.id)) ?? []) {
+			const name = columns.get(String(cell.column_id)) ?? String(cell.column_id);
+			answers[name] = cell.value ?? null;
+			statuses[name] = cell.status ?? null;
+		}
+		return item.call(this, itemIndex, {
+			report_id: reportId,
+			row_id: row.id,
+			file_id: row.file_id ?? null,
+			file_name: row.name ?? null,
+			answers,
+			statuses,
+		});
+	});
+}
+
+async function findReport(this: IExecuteFunctions, itemIndex: number): Promise<Result> {
+	return await findPaged.call(this, itemIndex, '/reports');
+}
+
+async function addDocumentsToRepository(
+	this: IExecuteFunctions,
+	itemIndex: number,
+): Promise<Result> {
+	const repositoryId = locatorValue.call(this, 'repository', itemIndex);
+	const fileIds = await documentIds.call(this, itemIndex);
+	if (fileIds.length === 0) throw noDocuments.call(this, itemIndex);
+	const body: IDataObject = { file_ids: fileIds };
+	const folderId = (this.getNodeParameter('folderId', itemIndex, '') as string).trim();
+	if (folderId) body.folder_id = folderId;
+	const { operation: started, settings } = await startJob.call(
+		this,
+		itemIndex,
+		`/repositories/${id(repositoryId)}/documents`,
+		body,
+	);
+	if (!settings.wait) return [item.call(this, itemIndex, started)];
+	const finished = await finishOperation.call(this, itemIndex, started, settings.maxWaitSeconds);
+	const result = (finished.result ?? {}) as IDataObject;
+	if (Number(result.indexed ?? 0) === 0 && Number(result.failed ?? 0) > 0) {
+		throw withContext(
+			new NodeOperationError(this.getNode(), 'Wordsmith could not index any of the documents', {
+				itemIndex,
+				description: `${String(result.failed)} documents failed to index in repository ${repositoryId}. Check the files, then retry the step.`,
+			}),
+			{ repository_id: repositoryId, failed: result.failed, operation_id: finished.id },
+		);
+	}
+	return [
+		item.call(this, itemIndex, {
+			repository_id: repositoryId,
+			indexed: result.indexed ?? null,
+			failed: result.failed ?? null,
+			operation_id: finished.id,
+		}),
+	];
+}
+
+async function findRepository(this: IExecuteFunctions, itemIndex: number): Promise<Result> {
+	return await findPaged.call(this, itemIndex, '/repositories');
+}
+
+// ── Search ──────────────────────────────────────────────────────────────────────────
+
+async function searchDocuments(this: IExecuteFunctions, itemIndex: number): Promise<Result> {
+	const body: IDataObject = {
+		query: this.getNodeParameter('query', itemIndex) as string,
+		limit: this.getNodeParameter('limit', itemIndex, 50),
+	};
+	const repositoryIds = splitList(this.getNodeParameter('repositoryIds', itemIndex, ''));
+	if (repositoryIds.length > 0) body.repository_ids = repositoryIds;
+	const found = await wordsmithApi.call(this, 'POST', '/search', { body });
+	const results = (found.items as IDataObject[] | undefined) ?? [];
+	const searched = splitList(found.searched_repository_ids);
+	const missed = repositoryIds.filter((repositoryId) => !searched.includes(repositoryId));
+	const scope =
+		repositoryIds.length === 0
+			? `Searched ${searched.length} repositories: your most recently active, up to 20.`
+			: missed.length > 0
+				? `Searched ${searched.length} of the ${repositoryIds.length} repositories asked for. Not searched: ${missed.join(', ')}.`
+				: undefined;
+	const lines = results.map((result) => `${String(result.file_name)}: ${String(result.snippet)}`);
+	return [
+		item.call(this, itemIndex, {
+			...found,
+			results_text: [...(scope ? [scope] : []), ...lines].join('\n\n'),
+		}),
+	];
+}
+
+async function searchLegalSources(this: IExecuteFunctions, itemIndex: number): Promise<Result> {
+	const options = this.getNodeParameter('researchOptions', itemIndex, {}) as IDataObject;
+	const body: IDataObject = {
+		query: this.getNodeParameter('query', itemIndex) as string,
+		limit: this.getNodeParameter('limit', itemIndex, 50),
+	};
+	const jurisdictions = splitList(options.jurisdictions).map((code) => code.toLowerCase());
+	if (jurisdictions.length > 0) body.jurisdictions = jurisdictions;
+	if (options.dateFrom) body.date_from = String(options.dateFrom).slice(0, 10);
+	if (options.dateTo) body.date_to = String(options.dateTo).slice(0, 10);
+	return [
+		item.call(this, itemIndex, await wordsmithApi.call(this, 'POST', '/research/search', { body })),
+	];
+}
+
+async function getLegalSourceDocument(this: IExecuteFunctions, itemIndex: number): Promise<Result> {
+	const source = String(this.getNodeParameter('source', itemIndex)).trim();
+	const qs: IDataObject = {
+		document_id: String(this.getNodeParameter('documentId', itemIndex)).trim(),
+		max_chars: this.getNodeParameter('maxChars', itemIndex, 20000),
+	};
+	const offset = this.getNodeParameter('offset', itemIndex, 0) as number;
+	if (offset > 0) qs.offset = offset;
+	return [
+		item.call(
+			this,
+			itemIndex,
+			await wordsmithApi.call(this, 'GET', `/research/documents/${id(source)}`, { qs }),
+		),
+	];
+}
+
+async function cancelOperation(this: IExecuteFunctions, itemIndex: number): Promise<Result> {
+	const operationId = String(this.getNodeParameter('operationId', itemIndex)).trim();
+	return [
+		item.call(
+			this,
+			itemIndex,
+			await wordsmithApi.call(this, 'POST', `/operations/${id(operationId)}/cancel`),
+		),
+	];
+}
+
 export const OPERATIONS: Record<
 	string,
 	(this: IExecuteFunctions, itemIndex: number, operation: string) => Promise<Result>
@@ -713,4 +1182,30 @@ export const OPERATIONS: Record<
 	attach_files_to_task: attachFilesToTask,
 	find_task: findTask,
 	get_operation: getOperation,
+	find_agent: findAgent,
+	import_file_from_url: importFileFromUrl,
+	create_document: createDocument,
+	get_file_text: getFileText,
+	translate_document: documentAction,
+	redact_document: documentAction,
+	accept_all_changes: documentAction,
+	merge_pdfs: documentAction,
+	generate_review_redline: generateReviewRedline,
+	reply_to_task_requester: replyToTaskRequester,
+	get_task_files: getTaskFiles,
+	create_report: createReport,
+	add_report_rows: addReportRows,
+	run_report: runReport,
+	export_report: exportReport,
+	find_report: findReport,
+	add_documents_to_repository: addDocumentsToRepository,
+	find_repository: findRepository,
+	search_documents: searchDocuments,
+	search_legal_sources: searchLegalSources,
+	find_conversation: findConversation,
+	find_user: findUser,
+	get_report_answers: getReportAnswers,
+	get_conversation_messages: getConversationMessages,
+	get_legal_source_document: getLegalSourceDocument,
+	cancel_operation: cancelOperation,
 };
