@@ -107,7 +107,7 @@ export function credentialName(this: WordsmithContext): string {
 }
 
 /** Keep in step with package.json; a test checks it. */
-export const PACKAGE_VERSION = '0.3.0';
+export const PACKAGE_VERSION = '0.3.1';
 export const INTEGRATION_HEADER = { 'Wordsmith-Integration': `n8n/${PACKAGE_VERSION}` };
 
 const REGION_HOSTS: Record<string, string> = {

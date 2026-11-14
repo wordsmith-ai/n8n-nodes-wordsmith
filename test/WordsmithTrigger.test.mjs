@@ -355,25 +355,28 @@ describe('Wordsmith Trigger webhook', () => {
 		assert.equal(report.status, 'succeeded');
 	});
 
-	it('reads a finished job of the chosen type, and skips other types', async () => {
-		const finished = (jobType, operationType) =>
+	it('outputs the finished job the event carries, and skips other job types', async () => {
+		// As delivered: the event's data is the whole operation.
+		const operation = (type) => ({
+			id: 'op1',
+			type,
+			status: 'succeeded',
+			resource: { type: 'repository', id: 'rp1' },
+			result: { indexed: 1, failed: 0 },
+		});
+		const finished = (jobType, type) =>
 			webhookContext({
-				body: event('operation.succeeded', { operation_id: 'op1', operation_type: operationType }),
+				body: event('operation.succeeded', operation(type)),
 				parameters: { event: 'job_finished', jobType },
 				sign: signedWith('whsec_1'),
-				respond: () => ok({ id: 'op1', type: operationType, status: 'succeeded' }),
+				respond: () => ok({}),
 			});
-		const review = finished('review', 'review');
-		const result = await trigger.webhook.call(review);
-		assert.equal(review.calls[0].url, `${API}/operations/op1`);
-		assert.deepEqual(result.workflowData[0][0].json.operation, {
-			id: 'op1',
-			type: 'review',
-			status: 'succeeded',
-		});
+		const indexing = finished('repository_indexing', 'repository_indexing');
+		const result = await trigger.webhook.call(indexing);
+		assert.equal(indexing.calls.length, 0);
+		assert.deepEqual(result.workflowData[0][0].json.operation, operation('repository_indexing'));
 		const draft = finished('review', 'draft');
 		assert.equal((await trigger.webhook.call(draft)).workflowData, undefined);
-		assert.equal(draft.calls.length, 0);
 		const any = finished('any', 'draft');
 		assert.ok((await trigger.webhook.call(any)).workflowData);
 	});

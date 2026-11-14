@@ -1,6 +1,6 @@
 {
 	"name": "n8n-nodes-wordsmith",
-	"version": "0.3.0",
+	"version": "0.3.1",
 	"description": "n8n nodes for Wordsmith: ask legal agents, review, redline, compare and draft documents, manage tasks, and start workflows from Wordsmith events.",
 	"license": "MIT",
 	"homepage": "https://github.com/wordsmith-ai/n8n-nodes-wordsmith#readme",

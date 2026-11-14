@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.1
+
+- Fixes Wordsmith Trigger's Background job finished, which failed on every event in 0.3.0. It now outputs the job the event carries, and its Job Type filter matches.
+
 ## 0.3.0
 
 - The Wordsmith node adds the rest of the shared automation catalogue: find an agent; import a file from a link, create a document from text and get a file's text; translate, redact, accept all tracked changes in and merge documents; create a redline from a review; get a task's files and reply to the person who sent it; create, add documents to, run, export, find and get the answers in reports; add documents to and find repositories; search your documents and legal sources and get a legal source document; find conversations and get their messages; find users; and cancel a job.

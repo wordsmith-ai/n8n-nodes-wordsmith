@@ -55,12 +55,19 @@ export interface TriggerRead {
 }
 
 /**
- * The event types each trigger subscribes to, the reads that turn an event into its resources, and the event
- * fields it outputs as they are. A trigger with neither reads nor fields outputs the whole event.
+ * The event types each trigger subscribes to, the resources an event already carries, the reads that turn an event
+ * into its resources, and the event fields it outputs as they are. A trigger with no carries, reads or fields
+ * outputs the whole event.
  */
 export const TRIGGERS: Record<
 	string,
-	{ eventTypes: string[]; reads?: (data: IDataObject) => TriggerRead[]; fields?: string[] }
+	{
+		eventTypes: string[];
+		/** The resources the event's data already holds, so no read is needed. */
+		carries?: (data: IDataObject) => IDataObject | undefined;
+		reads?: (data: IDataObject) => TriggerRead[];
+		fields?: string[];
+	}
 > = {
 	task_created: {
 		eventTypes: ['task.created'],
@@ -117,9 +124,8 @@ export const TRIGGERS: Record<
 	},
 	job_finished: {
 		eventTypes: ['operation.succeeded', 'operation.failed', 'operation.cancelled'],
-		reads: (data) => [
-			{ key: 'operation', id: data.operation_id, path: `/operations/${id(data.operation_id)}` },
-		],
+		// The event's data is the whole operation: Wordsmith delivers operation events only while the operation exists.
+		carries: (data) => ({ operation: data }),
 	},
 	any_event: { eventTypes: [] },
 };
@@ -180,7 +186,7 @@ export function filteredOut(
 		if (filters.onlyAssignedToMe) return !filters.userId || data.assignee_id !== filters.userId;
 	}
 	if (trigger === 'job_finished' && filters.jobType && filters.jobType !== 'any') {
-		return data.operation_type !== filters.jobType;
+		return data.type !== filters.jobType;
 	}
 	return false;
 }
@@ -506,10 +512,10 @@ export class WordsmithTrigger implements INodeType {
 			actor_kind: (event.actor as IDataObject | undefined)?.kind ?? null,
 		};
 		const spec = TRIGGERS[trigger];
-		if (!spec?.reads && !spec?.fields) {
+		if (!spec?.carries && !spec?.reads && !spec?.fields) {
 			return { workflowData: [this.helpers.returnJsonArray({ event, ...meta })] };
 		}
-		const output: IDataObject = {};
+		const output: IDataObject = { ...spec.carries?.(data) };
 		for (const read of spec.reads?.(data) ?? []) {
 			output[read.key] = await readResource.call(this, read, event);
 		}
